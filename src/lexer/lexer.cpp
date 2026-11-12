@@ -1,5 +1,6 @@
 #include <iostream>
-#include <cctype>
+#include <string>
+#include <vector>
 #include <unordered_map>
 #include <stdexcept>
 #include "lexer.h"
@@ -13,69 +14,63 @@ void initTokensMap() {
     }
 }
 
-void countingTokenSize(const std::string &text, unsigned len, unsigned index, Token &token, unsigned &tokenSize) {
-    while (index + tokenSize < len) {
-        char ch = text[index + tokenSize];
-        if (token.type == NUMBER && !std::isdigit(ch)) break;
-        if (token.type == IDENT && !std::isalnum(ch) && ch != '_') break;
-        tokenSize++;
-    } 
-}
+inline bool isDigit(char c) { return c >= '0' && c <= '9'; }
+inline bool isAlpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
+inline bool isSpace(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
 
-Token parseNumber(const std::string &text, unsigned len, unsigned index, unsigned &tokenSize) {
-    Token token;
-    token.type = NUMBER;
-    countingTokenSize(text, len, index, token, tokenSize);
-    token.value = text.substr(index, tokenSize);
-    return token;
-}
+DFAState transition(DFAState state, char c) {
+    switch (state) {
+        case S_START:
+            if (isAlpha(c)) return S_IDENT;
+            if (isDigit(c)) return S_NUMBER;
+            if (c == '/')   return S_SLASH;
+            if (c == '=')   return S_EQ;
+            if (c == '!')   return S_NEQ;
+            if (c == '<')   return S_LT;
+            if (c == '>')   return S_GT;
+            if (c == '-')   return S_MINUS;
+            return S_TRAP;
 
-Token parseIdentifier(const std::string &text, unsigned len, unsigned index, unsigned &tokenSize) {
-    Token token;
-    token.type = IDENT;
-    countingTokenSize(text, len, index, token, tokenSize);
-    token.value = text.substr(index, tokenSize);
-    return token;
-}
+        case S_IDENT:
+            if (isAlpha(c) || isDigit(c)) return S_IDENT;
+            return S_TRAP;
 
-Token parseTokenType(const std::string &text, unsigned len, unsigned index, unsigned &tokenSize) {
-    Token token;
-    tokenSize = 0;
-    char ch = text[index];
+        case S_NUMBER:
+            if (isDigit(c)) return S_NUMBER;
+            return S_TRAP;
 
-    if (index + 1 < len) {
-        std::string op2 = text.substr(index, 2);
-        auto foundOp2 = tokensMap.find(op2);
-        if (foundOp2 != tokensMap.end()) {
-            tokenSize = 2;
-            token.type = foundOp2->second;
-            token.value = op2;
-            return token;
-        }
+        case S_SLASH:
+            if (c == '/') return S_COMMENT;
+            return S_TRAP;
+            
+        case S_COMMENT:
+            if (c == '\n') return S_TRAP;
+            return S_COMMENT;
+
+        case S_EQ:
+            if (c == '=') return S_TRAP;
+            if (c == '>') return S_TRAP;
+            return S_TRAP;
+
+        case S_NEQ:
+            if (c == '=') return S_TRAP;
+            return S_TRAP;
+
+        case S_LT:
+            if (c == '=') return S_TRAP;
+            return S_TRAP;
+
+        case S_GT:
+            if (c == '=') return S_TRAP;
+            return S_TRAP;
+
+        case S_MINUS:
+            if (c == '>') return S_TRAP;
+            return S_TRAP;
+
+        default:
+            return S_TRAP;
     }
-
-    if (!std::isalnum(ch) && ch != '_') {
-        std::string op1 = text.substr(index, 1);
-        auto foudOp1 = tokensMap.find(op1);
-        if (foudOp1 != tokensMap.end()) {
-            tokenSize = 1;
-            token.type = foudOp1->second;
-            token.value = op1;
-            return token;
-        }
-    }
-
-    if (std::isdigit(ch)) return parseNumber(text, len, index, tokenSize);
-
-    if (std::isalpha(ch) || ch == '_') {
-        Token identToken = parseIdentifier(text, len, index, tokenSize);
-        
-        auto it = tokensMap.find(identToken.value);
-        if (it != tokensMap.end()) identToken.type = it->second;
-        return identToken;
-    }
-
-    throw std::runtime_error("Syntax Error");
 }
 
 std::vector<Token> tokenize(std::string text) {
@@ -89,44 +84,102 @@ std::vector<Token> tokenize(std::string text) {
     unsigned currentColumn = 1;
     
     while (index < len) {
-        char ch = text[index];
-        
-        if (ch == ' ' || ch == '\t') {
+        char startChar = text[index];
+
+        if (isSpace(startChar)) {
+            if (startChar == '\n') {
+                currentLine++;
+                currentColumn = 1;
+            }
+            else
+                currentColumn++;
+            index++;
+            continue;
+        }
+
+        DFAState state = S_START;
+        unsigned startIndex = index;
+        unsigned startLine = currentLine;
+        unsigned startColumn = currentColumn;
+        bool isComment = false;
+        bool isSingleChar = false;
+
+        std::string singleStr(1, startChar);
+        if (tokensMap.find(singleStr) != tokensMap.end() && 
+            startChar != '/' && startChar != '=' && startChar != '!' && 
+            startChar != '<' && startChar != '>' && startChar != '-') {
+            isSingleChar = true;
             index++;
             currentColumn++;
-            continue;
-        }
-        if (ch == '\n') {
-            index++;
-            currentLine++;
-            currentColumn = 1;
-            continue;
-        }
-        if (ch == '/' && index + 1 < len && text[index + 1] == '/') {
-            index += 2;
-            while (index < len && text[index] != '\n') {
-                index++;
-            }
-            continue;
-        }
-        
-        try {
-            unsigned tokenSize = 0;
-            Token token = parseTokenType(text, len, index, tokenSize);
-            
-            token.line = currentLine;
-            token.column = currentColumn;
-            
-            tokens.push_back(token);
-            
-            index += tokenSize;
-            currentColumn += tokenSize;
-        }
-        catch (const std::runtime_error &e) {       
-            throw std::runtime_error(std::string(e.what()) + ": line "+ std::to_string(currentLine)
-                                     + ", column " + std::to_string(currentColumn));
+        } else {
+            while (index < len) {
+                char c = text[index];
+                DFAState nextState = transition(state, c);
 
+                if (nextState == S_COMMENT) {
+                    while (index < len && text[index] != '\n') {
+                        index++;
+                    }
+                    isComment = true;
+                    break;
+                }
+
+                if (nextState == S_TRAP) {
+                    if ((state == S_EQ && (c == '=' || c == '>')) ||
+                        (state == S_NEQ && c == '=') ||
+                        (state == S_LT && c == '=') ||
+                        (state == S_GT && c == '=') ||
+                        (state == S_MINUS && c == '>')) {
+                        index++;
+                        currentColumn++;
+                    }
+                    break; 
+                }
+
+                state = nextState;
+                index++;
+                currentColumn++;
+            }
         }
+
+        if (isComment) {
+            continue;
+        }
+
+        if (index == startIndex) {
+            throw std::runtime_error("Syntax Error: trap state at line " + 
+                                     std::to_string(startLine) + ", column " + std::to_string(startColumn));
+        }
+
+        std::string lexeme = text.substr(startIndex, index - startIndex);
+        Token token;
+        token.line = startLine;
+        token.column = startColumn;
+
+        if (isSingleChar) {
+            token.type = tokensMap[lexeme];
+            token.value = lexeme;
+        } else if (state == S_IDENT) {
+            token.type = IDENT;
+            auto it = tokensMap.find(lexeme);
+            if (it != tokensMap.end()) token.type = it->second;
+            token.value = lexeme;
+        } 
+        else if (state == S_NUMBER) {
+            token.type = NUMBER;
+            token.value = lexeme;
+        }
+        else {
+            auto it = tokensMap.find(lexeme);
+            if (it != tokensMap.end()) {
+                token.type = it->second;
+                token.value = lexeme;
+            } else {
+                throw std::runtime_error("Syntax Error: unknown token " + lexeme);
+            }
+        }
+
+        tokens.push_back(token);
     }
     
     Token eofToken;

@@ -83,6 +83,20 @@ typedef struct Token {
     unsigned line, column;
 } Token;
 
+enum DFAState {
+    S_START,
+    S_IDENT,
+    S_NUMBER,
+    S_SLASH,
+    S_COMMENT,
+    S_EQ,
+    S_NEQ,
+    S_LT,
+    S_GT,
+    S_MINUS,
+    S_TRAP
+};
+
 inline std::unordered_map<std::string, TokenType> tokensMap;
 
 std::vector<Token> tokenize(std::string text);
